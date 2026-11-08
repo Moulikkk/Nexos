@@ -2,7 +2,6 @@
 
 #include <string_view>
 
-namespace nexos
-{
-	std::string_view version() noexcept;
+namespace nexos {
+std::string_view version() noexcept;
 }
