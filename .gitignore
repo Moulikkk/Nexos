@@ -1,1 +1,8 @@
 build/
+cmake-build-*/
+.cache/
+*.o
+*.a
+*.so
+*.out
+.DS_Store
