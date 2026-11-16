@@ -101,17 +101,3 @@ Nexos/
 - `Process::spawn` uses `execvp`, so executable lookup follows the caller's `PATH`.
 - The shell is intentionally a compact educational shell, not a full POSIX shell: it supports command pipelines and simple quoting, but not shell expansions, globbing, job control, or I/O redirection syntax.
 
-## Academic submission
-
-**Institution:** Jaypee Institute of Information Technology, Sector 62, Noida  
-**Course:** B.Tech CSE, III Semester — UNIX Programming Lab  
-**Project:** Nexos: A Unix Systems Abstraction Framework  
-**Submitted to:** Ms. Mayuri Gupta and Ms. Himani Agarwal
-
-**Team (B1):**
-
-- Saumya Baranwal — 2501030020
-- Ammar Rizvi — 2501030021
-- Moulik Satija — 2501030010
-- Ashmit Singh — 2501030011
-- Hritam Jay Singh — 2501030003
