@@ -145,6 +145,65 @@ int main(int argc, char* argv[]) {
                std::string::npos;
     });
 
+    test("Output redirection > overwrites a file", [&] {
+        unlink("/tmp/nex_redir.txt");
+        auto r = run_shell(shell,
+            "echo first > /tmp/nex_redir.txt\n"
+            "echo second > /tmp/nex_redir.txt\n"
+            "cat /tmp/nex_redir.txt\nexit\n");
+        unlink("/tmp/nex_redir.txt");
+        return r.output.find("second") != std::string::npos &&
+               r.output.find("first") == std::string::npos;
+    });
+
+    test("Output redirection >> appends to a file", [&] {
+        unlink("/tmp/nex_redir.txt");
+        auto r = run_shell(shell,
+            "echo first > /tmp/nex_redir.txt\n"
+            "echo second >> /tmp/nex_redir.txt\n"
+            "cat /tmp/nex_redir.txt\nexit\n");
+        unlink("/tmp/nex_redir.txt");
+        return r.output.find("first") != std::string::npos &&
+               r.output.find("second") != std::string::npos;
+    });
+
+    test("Input redirection < feeds a file to a command", [&] {
+        {
+            std::ofstream f("/tmp/nex_redir_in.txt");
+            f << "a\nb\nc\n";
+        }
+        auto r = run_shell(shell, "wc -l < /tmp/nex_redir_in.txt\nexit\n");
+        unlink("/tmp/nex_redir_in.txt");
+        return r.output.find("3") != std::string::npos;
+    });
+
+    test("Redirection combines with a pipeline", [&] {
+        unlink("/tmp/nex_redir.txt");
+        auto r = run_shell(shell,
+            "printf 'b\\na\\nb\\n' | sort | uniq > /tmp/nex_redir.txt\n"
+            "cat /tmp/nex_redir.txt\nexit\n");
+        unlink("/tmp/nex_redir.txt");
+        return r.output.find("a\nb\n") != std::string::npos;
+    });
+
+    test("Missing input file reports an error and the shell survives", [&] {
+        auto r = run_shell(shell,
+            "cat < /nex_no_such_file\necho STILL_ALIVE\nexit\n");
+        return r.output.find("open '/nex_no_such_file'") != std::string::npos &&
+               r.output.find("STILL_ALIVE") != std::string::npos;
+    });
+
+    test("Quoted > is ordinary text, not a redirection", [&] {
+        auto r = run_shell(shell, "echo \">\" quoted\nexit\n");
+        return r.output.find("> quoted") != std::string::npos;
+    });
+
+    test("Missing file name after > is rejected", [&] {
+        auto r = run_shell(shell, "echo hi >\nexit\n");
+        return r.output.find("expected a file name after '>'") !=
+               std::string::npos;
+    });
+
     std::cout << "\nShell test cases passed: " << passed << "/"
               << passed + failed << '\n';
     std::cout << "Failures: " << failed << '\n';
