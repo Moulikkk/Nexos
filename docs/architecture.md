@@ -160,7 +160,35 @@ At a high level, it:
 
 Closing unused ends is essential. If a process accidentally retains a pipe's write end, a reader may never receive EOF and can hang.
 
+If a later stage fails to start (for example, a missing executable), the shell closes its pipe ends before it waits for the stages that are already running. Otherwise an already-started producer could block forever on a pipe the shell still holds open.
+
 For exact descriptor wiring, consult `apps/nex/main.cpp` and `src/process.cpp` in the source revision being used.
+
+### File redirection
+
+The shell supports `<`, `>`, and `>>`, and this is where `nexos::File` is used by the shell. For:
+
+```sh
+sort < in.txt | uniq > out.txt
+```
+
+the wiring is:
+
+```text
+in.txt --File--> [sort] --pipe--> [uniq] --File--> out.txt
+```
+
+The shell:
+
+1. Splits the line into stages and parses each stage into its arguments plus any redirections. Unquoted `<`, `>`, and `>>` are operators; quoted or escaped ones are ordinary text.
+2. Opens every redirection file with `File` **before starting any process**: `<` opens read-only, `>` opens write-only with `Overwrite` and create, and `>>` opens write-only with `Append` and create. A failure throws `FileError` while nothing is running yet.
+3. Passes `file.native_handle()` to `Process::spawn` as `stdin_fd` (first stage) or `stdout_fd` (last stage), in place of the terminal or a pipe end.
+4. In the child, `spawn` uses `dup2` to place that descriptor on 0 or 1, then closes the original number.
+5. After all children are started, the parent destroys its `File` objects, closing its copies.
+
+The `File` descriptor is opened with `O_CLOEXEC`, so it does not leak into the executed program; the `dup2` copy on descriptor 0 or 1 does not carry that flag and survives `exec`.
+
+Rules enforced by the shell: `<` only on the first stage, `>` / `>>` only on the last, at most one of each per stage, and no redirection on built-ins.
 
 ## 8. Error handling
 
@@ -185,4 +213,4 @@ Typical failure causes include inaccessible paths, permission errors, failed I/O
 
 ## 10. Scope
 
-Nexos is an educational abstraction layer, not a complete POSIX shell or general-purpose process supervisor. The shell supports external commands, simple quoting, and pipelines, but not shell expansion, globbing, job control, or shell-style redirection.
+Nexos is an educational abstraction layer, not a complete POSIX shell or general-purpose process supervisor. The shell supports external commands, simple quoting, pipelines, and basic file redirection (`<`, `>`, `>>`), but not shell expansion, globbing, job control, standard-error redirection, here-documents, or redirection in the middle of a pipeline.

@@ -66,7 +66,7 @@ Arguments are passed to the executable as separate arguments. The shell supports
 nex$ echo "hello from Nexos"
 ```
 
-This is not a complete Bash-compatible parser. Do not assume support for variable expansion (`$HOME`), command substitution (`$(...)`), wildcard expansion (`*.cpp`), aliases, functions, or background jobs.
+This is not a complete Bash-compatible parser. Redirection operators (`<`, `>`, `>>`) are recognized only when they are not quoted or escaped. Do not assume support for variable expansion (`$HOME`), command substitution (`$(...)`), wildcard expansion (`*.cpp`), aliases, functions, or background jobs.
 
 ## Pipelines
 
@@ -88,7 +88,44 @@ For `ls -l | grep cpp | wc -l`:
 
 Each stage must contain a command. An empty stage such as `ls | | wc` is rejected.
 
-Shell redirection operators such as `>`, `>>`, and `<` are not documented as supported syntax.
+## Redirection
+
+Redirection connects a command's standard input or output to a file instead of the terminal or a pipe.
+
+| Syntax | Meaning |
+|---|---|
+| `cmd < file` | Read standard input from `file` |
+| `cmd > file` | Write standard output to `file`; creates it, or truncates it if it exists |
+| `cmd >> file` | Append standard output to `file`; creates it if needed |
+
+```sh
+nex$ echo hello > /tmp/out.txt
+nex$ echo again >> /tmp/out.txt
+nex$ cat /tmp/out.txt
+nex$ wc -l < /tmp/out.txt
+nex$ sort < /tmp/out.txt | uniq > /tmp/sorted.txt
+```
+
+Rules:
+
+- `<` is allowed only on the **first** command of a pipeline; `>` and `>>` only on the **last**.
+- Each command accepts at most one input and one output redirection.
+- Spaces around the operator are optional: `echo hi>out.txt` works.
+- A quoted or backslash-escaped operator is ordinary text: `echo ">"` and `echo \>` print a `>` character.
+- Built-ins (`cd`, `help`, `exit`) do not accept redirection.
+- New files are created with permissions `0644` (subject to the process umask).
+
+Error messages (the shell keeps running after each):
+
+| Situation | Message |
+|---|---|
+| Operator without a file name (`echo hi >`) | `nex: expected a file name after '>'` |
+| Input file missing or unreadable | `nex: open '/path': No such file or directory` (or the relevant system error) |
+| `<` not on the first command | `nex: input redirection '<' is only allowed on the first command` |
+| `>` / `>>` not on the last command | `nex: output redirection is only allowed on the last command` |
+| Redirection on a built-in | `nex: redirection is not supported for built-ins` |
+
+Not supported: standard-error redirection (`2>`), `&>`, here-documents (`<<`), and redirection in the middle of a pipeline.
 
 ## Process monitor
 

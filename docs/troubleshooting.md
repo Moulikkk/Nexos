@@ -65,6 +65,14 @@ A pipe reader normally observes EOF only after all open references to the pipe's
 
 Also remember that pipe buffers are finite. A writer can block when the buffer fills if no reader is consuming data. Correctly close unused pipe ends in every process.
 
+## Shell redirection errors
+
+- `nex: open '<path>': ...` — the redirection file could not be opened. For `<` the file must exist and be readable; for `>` and `>>` the directory must exist and be writable. The message ends with the system error text (for example `No such file or directory` or `Permission denied`).
+- `nex: expected a file name after '>'` — an operator was not followed by a file name.
+- `nex: input redirection '<' is only allowed on the first command` / `nex: output redirection is only allowed on the last command` — the shell supports redirection only at the two ends of a pipeline.
+- `nex: redirection is not supported for built-ins` — `cd`, `help`, and `exit` do not accept redirection.
+- An operator you wanted as plain text is being treated as a redirect — quote it (`echo ">"`) or escape it (`echo \>`).
+
 ## File operation fails
 
 Possible causes include a missing path, insufficient permissions, unsupported operation for the descriptor type, filesystem exhaustion, or resource limits. Catch the appropriate Nexos error and inspect its contextual message and system error code.

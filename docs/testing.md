@@ -47,7 +47,7 @@ The reported run contained 25 assertions across these groups.
 
 ## Recorded shell integration coverage
 
-The shell integration test contained seven groups:
+The shell integration test now contains fourteen groups:
 
 1. Shell starts and exits.
 2. Help built-in.
@@ -56,6 +56,15 @@ The shell integration test contained seven groups:
 5. Handles quoted arguments.
 6. Connects commands using a pipeline.
 7. Rejects an empty pipeline command.
+8. Output redirection `>` overwrites a file.
+9. Output redirection `>>` appends to a file.
+10. Input redirection `<` feeds a file to a command.
+11. Redirection combines with a pipeline.
+12. A missing input file reports an error and the shell survives.
+13. A quoted `>` is ordinary text, not a redirection.
+14. A missing file name after `>` is rejected.
+
+Groups 8 to 14 were added with the redirection feature, after the recorded run below. They were checked by compiling the library and shell directly with `g++ -std=c++20` and running the test executables (14 of 14 shell groups passed); re-run CTest to confirm on your machine.
 
 ## Recorded result
 
@@ -93,8 +102,14 @@ help
 pwd
 echo "hello from Nexos"
 ls -l | grep cpp | wc -l
+echo hello > /tmp/out.txt
+echo again >> /tmp/out.txt
+wc -l < /tmp/out.txt
+cat < /nonexistent
 exit
 ```
+
+Expected: `wc -l` prints `2`, and the missing file prints an `open '/nonexistent'` error without ending the shell.
 
 Finally, run:
 
