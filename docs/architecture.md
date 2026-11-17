@@ -1,29 +1,188 @@
-# Nexos Architecture
+# Nexos architecture
 
-## Overview
+## 1. System overview
 
-Nexos has three layers:
+Nexos has a reusable systems library and two demonstration applications.
 
-1. **Public interface** (`include/nexos`) — C++ classes and types consumed by applications.
-2. **System-call implementation** (`src`) — maps the public interface to Unix/Linux primitives.
-3. **Demonstration applications** (`apps`) — a pipeline-capable shell and a `/proc` process monitor.
+```text
+                 User
+                  |
+          +-------+-------+
+          |               |
+       nex shell       nexps monitor
+          |               |
+    Nexos library       Linux /proc
+     /    |    \
+  File   Pipe  Process
+   |      |      |
+ open/   pipe() fork/execvp/
+ read/          waitpid()
+ write/
+ lseek/
+ close
+```
 
-## Resource ownership
+The library maps operating-system resources to C++ objects. The applications demonstrate how those objects can be combined.
 
-`File` owns one file descriptor returned by `open()`. `Pipe` owns two descriptors returned by `pipe2()`. `Process` owns a child-process handle (PID) until it has been waited for. These types delete copy operations and implement move operations so a resource has one C++ owner.
+## 2. File descriptors
 
-## File I/O
+A file descriptor is a small integer used by a process to refer to an open kernel-managed I/O resource. It may refer to a regular file, pipe, terminal, socket, or another supported object.
 
-`File` maps to `open`, `read`, `write`, `lseek`, and `close`. `WriteMode` controls truncation/appending independently of access permissions. `O_CLOEXEC` prevents descriptors from unintentionally leaking through `exec`.
+| Descriptor | Conventional name | Purpose |
+|---:|---|---|
+| 0 | Standard input | Input to a process |
+| 1 | Standard output | Normal output |
+| 2 | Standard error | Error output |
 
-## Process management
+`open()` returns a descriptor on success. `read()`, `write()`, and `lseek()` operate on it. `close()` releases the process's reference to it.
 
-`Process::spawn` forks. The child optionally redirects standard input/output with `dup2`, closes supplied inherited pipe descriptors, and calls `execvp`. The parent receives a move-only `Process` handle and calls `wait()` to collect the child's status.
+## 3. RAII and ownership
 
-## Inter-process communication
+RAII (Resource Acquisition Is Initialization) ties a resource's lifetime to an object's lifetime:
 
-`Pipe` wraps an unnamed byte-stream pipe. The shell creates one pipe between each adjacent pair of commands. It connects the producer's stdout to the pipe write end and the consumer's stdin to the pipe read end. Unused descriptors are closed so readers can observe EOF.
+1. Construct an object and acquire the resource.
+2. Use the object's methods.
+3. Let the object leave scope.
+4. Its destructor releases or finalizes the resource.
 
-## Process monitoring
+Nexos uses this approach for file descriptors, pipe descriptors, and child-process lifecycle management.
 
-`nexps` enumerates numeric directories in `/proc`, parses `/proc/<pid>/stat`, and reports process ID, parent ID, state, resident set size, and accumulated user/system CPU ticks.
+### Why copying is disabled
+
+If two objects copied the same raw descriptor and both believed they owned it, both destructors could close it. The descriptor number might then be reused for another resource, making accidental double-close especially dangerous. Owning classes are therefore non-copyable.
+
+### Why moving is supported
+
+Move operations transfer ownership instead of duplicating it. The destination becomes responsible for cleanup, while the source no longer owns the resource.
+
+## 4. File abstraction
+
+`nexos::File` wraps the descriptor-based file API.
+
+| System call | Purpose |
+|---|---|
+| `open()` | Open a path and obtain a descriptor |
+| `read()` | Read bytes |
+| `write()` | Write bytes |
+| `lseek()` | Change the current offset |
+| `close()` | Release the descriptor |
+
+Conceptual lifecycle:
+
+```text
+construct File -> open -> use descriptor -> destructor -> close
+```
+
+Write modes:
+
+- **Preserve:** leave existing data intact and write at the current offset.
+- **Overwrite:** truncate existing contents when opening.
+- **Append:** use `O_APPEND`, directing writes to the end.
+
+A bounded read requests at most the specified number of bytes. It is not guaranteed to return that many. `read_all()` continues from the current offset until EOF; it does not implicitly rewind first.
+
+## 5. Process abstraction
+
+The usual Unix process lifecycle is:
+
+```text
+Parent
+  |
+  | fork()
+  +-------------------------+
+  |                         |
+  v                         v
+Parent continues          Child
+                            |
+                         execvp()
+                            |
+                      New program runs
+                            |
+                         exits
+                            |
+Parent calls waitpid() <----+
+        |
+  collect status
+```
+
+- `fork()` creates a child process.
+- `execvp()` replaces the child process image with the requested executable. Its `p` variant searches `PATH`.
+- `waitpid()` lets the parent wait for a child and collect its termination status.
+
+A successful `execvp()` does not return to the old program image. If it fails, the child-side code must handle the error.
+
+The documented `Process` destructor waits if the caller has not already waited. This avoids leaving an unreaped child, but destruction can block while a child is still running.
+
+## 6. Pipes and inter-process communication
+
+An unnamed pipe is a unidirectional byte stream with two descriptors:
+
+```text
+writer -- write descriptor --> kernel pipe buffer
+                                  |
+reader <-- read descriptor -------+
+```
+
+Pipes do not preserve message boundaries. Readers receive a stream of bytes.
+
+Important rules:
+
+- A pipe has finite buffering; a writer can block if the buffer fills.
+- A reader can block while waiting for data.
+- EOF is observed only after all references to the write end are closed and buffered data is consumed.
+- Each process should close pipe ends it does not use.
+
+`nexos::Pipe` owns the descriptors created for an unnamed pipe.
+
+## 7. How command pipelines work
+
+For:
+
+```sh
+ls -l | grep cpp | wc -l
+```
+
+the shell creates pipes between adjacent commands:
+
+```text
+[ls -l] --pipe 1--> [grep cpp] --pipe 2--> [wc -l]
+```
+
+At a high level, it:
+
+1. Splits the input into pipeline stages while respecting supported quoting.
+2. Parses each stage into a command and its arguments.
+3. Creates unnamed pipes.
+4. Spawns a process for each command.
+5. Connects each child's standard input/output to the appropriate pipe ends.
+6. Closes pipe descriptors the parent no longer needs.
+7. Waits for the child processes and observes their termination.
+
+Closing unused ends is essential. If a process accidentally retains a pipe's write end, a reader may never receive EOF and can hang.
+
+For exact descriptor wiring, consult `apps/nex/main.cpp` and `src/process.cpp` in the source revision being used.
+
+## 8. Error handling
+
+System calls commonly report failure through a return value and set `errno`. Nexos defines `FileError`, `ProcessError`, and `PipeError` to provide contextual messages while preserving the associated system error code.
+
+Typical failure causes include inaccessible paths, permission errors, failed I/O, process-creation errors, missing executables, and pipe-creation errors. Exact constructors and accessors are declared in `include/nexos/error.hpp`.
+
+## 9. Process monitor
+
+`nexps` is a Linux-specific application that reads process metadata from `/proc`.
+
+| Field | Meaning |
+|---|---|
+| PID | Process identifier |
+| PPID | Parent process identifier |
+| State | Process state |
+| RSS | Resident memory, displayed in KB |
+| CPU ticks | CPU time counters |
+| Command | Process command name |
+
+`/proc` is a virtual filesystem exposing kernel and process information. It is not an ordinary persistent directory of files.
+
+## 10. Scope
+
+Nexos is an educational abstraction layer, not a complete POSIX shell or general-purpose process supervisor. The shell supports external commands, simple quoting, and pipelines, but not shell expansion, globbing, job control, or shell-style redirection.

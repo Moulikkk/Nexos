@@ -1,66 +1,69 @@
 # Nexos — A Unix Systems Abstraction Framework
 
-Nexos is a C++20 library that wraps core Unix/Linux operating-system primitives in small RAII-based C++ abstractions. It demonstrates file descriptors, process creation and synchronization, unnamed pipes, and command pipelines.
+Nexos is a C++20 library and set of demonstration applications that wrap selected Unix/Linux operating-system primitives in small RAII-based C++ abstractions. It demonstrates file descriptors, process creation and synchronization, unnamed pipes, and command pipelines.
 
-## Features
+## Components
 
-- **File I/O (`nexos::File`)** — wraps `open`, `read`, `write`, `lseek`, and `close`; supports read/write access, preserve/overwrite/append modes, optional creation, move-only ownership, and automatic cleanup.
-- **Process management (`nexos::Process`)** — wraps `fork`, `execvp`, and `waitpid`; supports child process creation and exit-status retrieval.
-- **Pipes (`nexos::Pipe`)** — owns an unnamed pipe and exposes its read/write descriptors for parent-child IPC and command pipelines.
-- **Custom errors** — `FileError`, `ProcessError`, and `PipeError` preserve the system error code and provide contextual messages.
-- **Mini shell (`nex`)** — executes external commands, supports `cd`, `help`, `exit`, quoting, and pipelines such as `ls -l | grep cpp | wc -l`.
-- **Process monitor (`nexps`)** — reads Linux `/proc` process statistics and displays PID, PPID, state, resident memory, CPU ticks, and command name.
+- **`nexos::File`** — owns a file descriptor and wraps file opening, reading, writing, seeking, and closing. Supports read/write access, preserve/overwrite/append modes, optional creation, move-only ownership, and automatic cleanup.
+- **`nexos::Pipe`** — owns an unnamed pipe and exposes its read and write descriptors for inter-process communication.
+- **`nexos::Process`** — creates child processes and manages their lifecycle using `fork()`, `execvp()`, and `waitpid()`.
+- **Custom errors** — `FileError`, `ProcessError`, and `PipeError` preserve system error information and provide contextual messages.
+- **`nex`** — an educational mini shell supporting external commands, `cd`, `help`, `exit`, simple quoting, and pipelines.
+- **`nexps`** — a Linux process monitor that reads `/proc` and displays PID, PPID, state, resident memory, CPU ticks, and command name.
 
 ## Requirements
 
-- Linux (recommended) or another Unix-like system with a C++20 compiler.
+- Linux recommended; other Unix-like systems may support the library.
+- C++20 compiler (GCC 10+, Clang 12+, or equivalent).
 - CMake 3.20 or newer.
-- GCC 10+, Clang 12+, or another compiler with C++20 support.
 
-`nexps` reads Linux `/proc`, and the no-access `File` mode uses `O_PATH` where available. The project is primarily targeted at Linux.
+`nexps` specifically requires Linux `/proc`. The no-access `File` mode uses `O_PATH` where available. The project is primarily targeted at Linux.
 
-## Build
+## Build and test
 
-From the project root:
+Run from the project root:
 
-```bash
+```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
+cmake --build build -j"$(nproc)"
 ctest --test-dir build --output-on-failure
 ```
 
-No external test framework or network download is required.
+The first command configures the project, the second compiles it, and the third runs the registered tests. No external test framework or network download is required by the documented build.
 
 ## Run
 
 Start the shell:
 
-```bash
+```sh
 ./build/nex
 ```
 
-Try a pipeline:
+Example session:
 
 ```text
+nex$ help
+nex$ pwd
 nex$ ls -l | grep cpp | wc -l
 nex$ ps aux | grep bash
-nex$ help
 nex$ exit
 ```
 
-Show a one-time process snapshot:
+`pwd`, `ls`, `grep`, `wc`, and `ps` are external programs, not Nexos built-ins. They are located using the caller's `PATH` through `execvp()`.
 
-```bash
+One-time process snapshot:
+
+```sh
 ./build/nexps --once
 ```
 
-Run the live process monitor (refreshes every second):
+Live process monitor (refreshes approximately every second):
 
-```bash
+```sh
 ./build/nexps
 ```
 
-Press Ctrl+C to exit the monitor.
+Press `Ctrl+C` to stop the live monitor.
 
 ## Library example
 
@@ -71,33 +74,44 @@ Press Ctrl+C to exit the monitor.
 int main() {
     nexos::File file("notes.txt", true, true,
                      nexos::WriteMode::Overwrite, true);
-    file.write("Hello from Nexos!\n");
+    file.write("Hello from Nexos!\\n");
     file.seek(0, SEEK_SET);
     std::cout << file.read_all();
 }
 ```
 
-## Project layout
+The example selects read access, write access, overwrite mode, and file creation. Consult `include/nexos/file.hpp` for exact overloads and defaults.
+
+## Project structure
 
 ```text
 Nexos/
 ├── include/nexos/       # Public library headers
 ├── src/                 # Library implementations
 ├── apps/nex/            # Mini shell
-├── apps/nexps/          # /proc process monitor
+├── apps/nexps/          # Linux /proc process monitor
 ├── tests/               # Automated tests
-├── docs/                # Design and usage notes
+├── docs/                # Design and usage documentation
 ├── CMakeLists.txt
 └── README.md
 ```
 
-## Design notes
+## Documentation
 
-- `File`, `Pipe`, and `Process` are non-copyable to prevent accidental duplication of ownership.
-- They are movable so ownership can be transferred safely.
-- Destructors release owned resources. A `Process` destructor waits for its child if the caller has not already waited; this avoids leaving an unreaped child process, but means destroying a live `Process` can block until that child exits.
-- `File::read(count)` reads at most `count` bytes; `read_all()` reads from the current offset until EOF.
-- `WriteMode::Preserve` leaves existing data untouched and writes at the current offset. `Overwrite` truncates on open. `Append` uses `O_APPEND`.
-- `Process::spawn` uses `execvp`, so executable lookup follows the caller's `PATH`.
-- The shell is intentionally a compact educational shell, not a full POSIX shell: it supports command pipelines and simple quoting, but not shell expansions, globbing, job control, or I/O redirection syntax.
+- [Architecture](docs/architecture.md) — system calls, ownership, RAII, pipes, and process pipelines.
+- [Command reference](docs/command-reference.md) — shell commands, quoting, pipelines, and process monitor usage.
+- [API guide](docs/api-reference.md) — library abstractions, usage patterns, and error handling.
+- [Testing](docs/testing.md) — build commands and recorded test coverage.
+- [Troubleshooting](docs/troubleshooting.md) — common build, runtime, and platform issues.
 
+## Design and ownership
+
+`File`, `Pipe`, and `Process` are non-copyable to prevent accidental duplication of ownership. They are movable so ownership can be transferred safely. Destructors release resources.
+
+The `Process` destructor waits for its child if the caller has not already waited. This avoids leaving an unreaped child, but destroying a live `Process` can block until that child exits.
+
+`File::read(count)` reads at most `count` bytes; a successful read may return fewer. `read_all()` reads from the current offset until EOF. `WriteMode::Preserve` leaves existing data untouched and writes at the current offset, `Overwrite` truncates on open, and `Append` uses `O_APPEND`.
+
+## Limitations
+
+The shell is intentionally compact, not a full POSIX shell. It supports command pipelines and simple quoting, but does not implement shell expansions, globbing, job control, or shell-style I/O redirection.
